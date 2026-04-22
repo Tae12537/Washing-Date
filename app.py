@@ -488,3 +488,4 @@ if st.session_state.processed and file1 and file2:
         "📥 Download Excel",
         data=output.getvalue(),
         file_name="washing_date_result.xlsx"
+    )
