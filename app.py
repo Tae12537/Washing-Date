@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import re
 
-st.title("Washing Date App 🧼")
+st.title("📊 Washing Date Processor")
 
 # =========================
 # Upload Files
