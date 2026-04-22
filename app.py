@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="Washing Date App", layout="wide")
 
-st.title("📊 "Washing Date Processor")
+st.title("📊 Washing Date Processor")
 
 # =========================
 # Session (สำหรับ reset)
