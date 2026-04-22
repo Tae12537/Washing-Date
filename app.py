@@ -8,8 +8,8 @@ st.title("📊 Lot / Barcode Processor")
 # =========================
 # Upload UI
 # =========================
-file1 = st.file_uploader("📂 Upload File 1 (Lot/Serial)", type=["xlsx","csv"])
-file2 = st.file_uploader("📂 Upload File 2 (Runcard / Barcode)", type=["xlsx","csv"])
+file1 = st.file_uploader("📂 Upload File 1 (Lot/Serial)", type=["xlsx","xls","csv"])
+file2 = st.file_uploader("📂 Upload File 2 (Runcard / Barcode)", type=["xlsx","xls","csv"])
 
 # =========================
 # Functions
