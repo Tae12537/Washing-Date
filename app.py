@@ -3,13 +3,30 @@ import pandas as pd
 import io
 import re
 
-st.title("📊 Lot / Barcode Processor")
+st.set_page_config(page_title="Washing Date App", layout="wide")
+
+st.title("📊 "Washing Date Processor")
 
 # =========================
-# Upload UI
+# Session (สำหรับ reset)
 # =========================
-file1 = st.file_uploader("📂 Upload File 1 (Lot/Serial)", type=["xlsx","xls","csv"])
-file2 = st.file_uploader("📂 Upload File 2 (Runcard / Barcode)", type=["xlsx","xls","csv"])
+if "key" not in st.session_state:
+    st.session_state.key = 0
+
+# =========================
+# Upload
+# =========================
+file1 = st.file_uploader(
+    "📂 Upload File 1 (Lot/Serial)",
+    type=["xlsx", "xls", "csv"],
+    key=f"file1_{st.session_state.key}"
+)
+
+file2 = st.file_uploader(
+    "📂 Upload File 2 (Runcard / Barcode)",
+    type=["xlsx", "xls", "csv"],
+    key=f"file2_{st.session_state.key}"
+)
 
 # =========================
 # Functions
@@ -48,36 +65,58 @@ def extract_ww_day(barcode):
         return None, None
 
 # =========================
-# Process Button
+# Buttons
 # =========================
-if file1 and file2:
-    if st.button("🚀 Process Data"):
+col1, col2 = st.columns(2)
 
-        df1 = read_file(file1)
-        df2 = read_file(file2)
+with col1:
+    process = st.button("🚀 Process Data")
 
-        df1 = find_header(df1, "Lot")
-        df2 = find_header(df2, "Runcard")
+with col2:
+    reset = st.button("🔄 Reset")
 
-        df1.columns = df1.columns.astype(str).str.strip()
-        df2.columns = df2.columns.astype(str).str.strip()
+# =========================
+# Reset logic
+# =========================
+if reset:
+    st.session_state.key += 1
+    st.rerun()
 
-        df1 = df1.rename(columns={"Lot/Serial": "Lot"})
-        df2 = df2.rename(columns={"Runcard No": "Lot"})
+# =========================
+# Process
+# =========================
+if file1 and file2 and process:
 
-        df1["Lot"] = df1["Lot"].astype(str).str.strip()
-        df2["Lot"] = df2["Lot"].astype(str).str.strip()
+    df1 = read_file(file1)
+    df2 = read_file(file2)
 
-        merged = pd.merge(df1[["Lot"]], df2[["Lot", "Barcode No"]], on="Lot", how="inner")
+    df1 = find_header(df1, "Lot")
+    df2 = find_header(df2, "Runcard")
 
-        merged[['WW', 'Day']] = merged['Barcode No'].apply(
-            lambda x: pd.Series(extract_ww_day(x))
-        )
+    df1.columns = df1.columns.astype(str).str.strip()
+    df2.columns = df2.columns.astype(str).str.strip()
 
-        # =========================
-        # Date DB
-        # =========================
-        data = """WW,Day,Date
+    df1 = df1.rename(columns={"Lot/Serial": "Lot"})
+    df2 = df2.rename(columns={"Runcard No": "Lot"})
+
+    df1["Lot"] = df1["Lot"].astype(str).str.strip()
+    df2["Lot"] = df2["Lot"].astype(str).str.strip()
+
+    merged = pd.merge(
+        df1[["Lot"]],
+        df2[["Lot", "Barcode No"]],
+        on="Lot",
+        how="inner"
+    )
+
+    merged[['WW', 'Day']] = merged['Barcode No'].apply(
+        lambda x: pd.Series(extract_ww_day(x))
+    )
+
+    # =========================
+    # Date DB (ใส่ full ได้)
+    # =========================
+    data = """WW,Day,Date
 28,1,03-Jan-2026
 28,2,04-Jan-2026
 28,3,05-Jan-2026
@@ -442,34 +481,43 @@ if file1 and file2:
 26,5,30-Dec-2026
 26,6,31-Dec-2026
 """
-        date_db = pd.read_csv(io.StringIO(data))
+    date_db = pd.read_csv(io.StringIO(data))
 
-        result = pd.merge(merged, date_db, on=["WW", "Day"], how="left")
+    result = pd.merge(merged, date_db, on=["WW", "Day"], how="left")
 
-        output = result.rename(columns={"Date": "Washing Date"})
+    output = result[["Lot", "Barcode No", "WW", "Day", "Date"]]
+    output = output.rename(columns={"Date": "Washing Date"})
 
-        summary = (
-            output.groupby("Washing Date")["Lot"]
-            .count()
-            .reset_index()
-            .rename(columns={"Lot": "Total Lot"})
-        )
+    # =========================
+    # Summary
+    # =========================
+    summary = (
+        output.groupby("Washing Date")["Lot"]
+        .count()
+        .reset_index()
+        .rename(columns={"Lot": "Total Lot"})
+    )
 
-        st.success("✅ Done!")
-        st.dataframe(output)
+    st.success(f"✅ Done! {len(output)} rows")
 
-        # =========================
-        # Export Excel
-        # =========================
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            output.to_excel(writer, index=False, sheet_name="Result")
+    st.subheader("📋 Result")
+    st.dataframe(output, use_container_width=True)
 
-            start_row = len(output) + 3
-            summary.to_excel(writer, index=False, sheet_name="Result", startrow=start_row)
+    st.subheader("📊 Summary")
+    st.dataframe(summary, use_container_width=True)
 
-        st.download_button(
-            "📥 Download Excel",
-            data=buffer.getvalue(),
-            file_name="result.xlsx"
-        )
+    # =========================
+    # Export Excel
+    # =========================
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        output.to_excel(writer, index=False, sheet_name="Result")
+
+        start_row = len(output) + 3
+        summary.to_excel(writer, index=False, sheet_name="Result", startrow=start_row)
+
+    st.download_button(
+        "📥 Download Excel",
+        data=buffer.getvalue(),
+        file_name="result.xlsx"
+    )
