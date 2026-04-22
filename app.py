@@ -3,148 +3,80 @@ import pandas as pd
 import io
 import re
 
-st.set_page_config(page_title="Washing Date App", layout="wide")
-
-st.title("📊 Washing Date Processor")
+st.title("Washing Date App 🧼")
 
 # =========================
-# Session (reset control)
+# Upload Files
 # =========================
-if "key" not in st.session_state:
-    st.session_state.key = 0
+file1 = st.file_uploader("Upload File 1 (Lot/Serial)", type=["xlsx","xls","csv"])
+file2 = st.file_uploader("Upload File 2 (Runcard)", type=["xlsx","xls","csv"])
 
-# =========================
-# Upload
-# =========================
-file1 = st.file_uploader(
-    "📂 Upload File 1 (Lot/Serial)",
-    type=["xlsx", "xls", "csv"],
-    key=f"file1_{st.session_state.key}"
-)
+if file1 and file2:
 
-file2 = st.file_uploader(
-    "📂 Upload File 2 (Runcard / Barcode)",
-    type=["xlsx", "xls", "csv"],
-    key=f"file2_{st.session_state.key}"
-)
-
-# =========================
-# Functions
-# =========================
-def read_file(file):
-    try:
+    # =========================
+    # Read File
+    # =========================
+    def read_file(file):
         if file.name.endswith('.csv'):
             return pd.read_csv(file)
         try:
             return pd.read_excel(file, engine='openpyxl')
         except:
+            file.seek(0)
             return pd.read_excel(file, engine='xlrd')
-    except Exception as e:
-        st.error(f"❌ อ่านไฟล์ไม่ได้: {e}")
-        st.stop()
-
-def find_header(df, keyword):
-    if df.empty:
-        st.error("❌ ไฟล์ว่าง")
-        st.stop()
-
-    max_rows = min(10, len(df))  # ✅ FIX index error
-
-    for i in range(max_rows):
-        row = df.iloc[i].astype(str)
-
-        if row.str.contains(keyword, case=False).any():
-            df.columns = row
-            return df[i+1:]
-
-    return df
-
-def extract_ww_day(barcode):
-    try:
-        s = str(barcode)
-        match = re.search('[A-Za-z]', s)
-        if not match:
-            return None, None
-
-        start = match.start()
-        code = s[start+3:start+6]
-
-        if len(code) != 3 or not code.isdigit():
-            return None, None
-
-        return int(code[:2]), int(code[2])
-    except:
-        return None, None
-
-# =========================
-# Buttons
-# =========================
-col1, col2 = st.columns(2)
-
-with col1:
-    process = st.button("🚀 Process Data")
-
-with col2:
-    reset = st.button("🔄 Reset")
-
-# =========================
-# Reset
-# =========================
-if reset:
-    st.session_state.key += 1
-    st.rerun()
-
-# =========================
-# Process
-# =========================
-if file1 and file2 and process:
 
     df1 = read_file(file1)
     df2 = read_file(file2)
 
-    df1 = find_header(df1, "Lot")
-    df2 = find_header(df2, "Runcard")
-
+    # =========================
+    # Clean Column
+    # =========================
     df1.columns = df1.columns.astype(str).str.strip()
     df2.columns = df2.columns.astype(str).str.strip()
 
-    # rename กันพัง
-    df1 = df1.rename(columns=lambda x: x.strip())
-    df2 = df2.rename(columns=lambda x: x.strip())
-
-    if "Lot/Serial" in df1.columns:
-        df1 = df1.rename(columns={"Lot/Serial": "Lot"})
-    if "Runcard No" in df2.columns:
-        df2 = df2.rename(columns={"Runcard No": "Lot"})
-
-    if "Lot" not in df1.columns or "Lot" not in df2.columns:
-        st.error("❌ ไม่เจอ column Lot")
-        st.stop()
-
-    if "Barcode No" not in df2.columns:
-        st.error("❌ ไม่เจอ column Barcode No")
-        st.stop()
+    df1 = df1.rename(columns={"Lot/Serial": "Lot"})
+    df2 = df2.rename(columns={"Runcard No": "Lot"})
 
     df1["Lot"] = df1["Lot"].astype(str).str.strip()
     df2["Lot"] = df2["Lot"].astype(str).str.strip()
 
-    merged = pd.merge(
-        df1[["Lot"]],
-        df2[["Lot", "Barcode No"]],
-        on="Lot",
-        how="inner"
-    )
+    # =========================
+    # IMPORTANT FIX 🔥
+    # เอาแค่ 1 row ต่อ lot
+    # =========================
+    df2 = df2.drop_duplicates(subset=["Lot"])
 
-    if merged.empty:
-        st.warning("⚠️ ไม่พบข้อมูลที่ match กัน")
-        st.stop()
+    # =========================
+    # Merge (เอาเฉพาะ lot จากไฟล์ 1)
+    # =========================
+    merged = pd.merge(df1[["Lot"]], df2[["Lot","Barcode No"]], on="Lot", how="left")
 
-    merged[['WW', 'Day']] = merged['Barcode No'].apply(
+    # =========================
+    # Extract WW + Day
+    # =========================
+    def extract_ww_day(barcode):
+        try:
+            s = str(barcode)
+            match = re.search('[A-Za-z]', s)
+            if not match:
+                return None, None
+
+            start = match.start()
+            code = s[start+3:start+6]
+
+            if len(code) != 3 or not code.isdigit():
+                return None, None
+
+            return int(code[:2]), int(code[2])
+        except:
+            return None, None
+
+    merged[['WW','Day']] = merged['Barcode No'].apply(
         lambda x: pd.Series(extract_ww_day(x))
     )
 
     # =========================
-    # Date DB (ใส่เต็มได้)
+    # Date DB
     # =========================
     data = """WW,Day,Date
 28,1,03-Jan-2026
@@ -513,41 +445,49 @@ if file1 and file2 and process:
 """
     date_db = pd.read_csv(io.StringIO(data))
 
-    result = pd.merge(merged, date_db, on=["WW", "Day"], how="left")
+    # =========================
+    # Map Date
+    # =========================
+    result = pd.merge(merged, date_db, on=["WW","Day"], how="left")
 
-    output = result[["Lot", "Barcode No", "WW", "Day", "Date"]]
-    output = output.rename(columns={"Date": "Washing Date"})
+    result = result[["Lot","Barcode No","Date"]]
+    result = result.rename(columns={"Date":"Washing Date"})
 
     # =========================
     # Summary
     # =========================
     summary = (
-        output.groupby("Washing Date")["Lot"]
+        result.groupby("Washing Date")["Lot"]
         .count()
         .reset_index()
-        .rename(columns={"Lot": "Total Lot"})
+        .rename(columns={"Lot":"Total Lot"})
     )
 
-    st.success(f"✅ Done! {len(output)} rows")
+    # =========================
+    # Show Result
+    # =========================
+    st.write("### Result")
+    st.dataframe(result)
 
-    st.subheader("📋 Result")
-    st.dataframe(output, use_container_width=True)
-
-    st.subheader("📊 Summary")
-    st.dataframe(summary, use_container_width=True)
+    st.write("### Summary")
+    st.dataframe(summary)
 
     # =========================
-    # Export Excel
+    # Download
     # =========================
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        output.to_excel(writer, index=False, sheet_name="Result")
-
-        start_row = len(output) + 3
-        summary.to_excel(writer, index=False, sheet_name="Result", startrow=start_row)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        result.to_excel(writer, index=False, sheet_name="Result")
+        summary.to_excel(writer, index=False, sheet_name="Summary")
 
     st.download_button(
-        "📥 Download Excel",
-        data=buffer.getvalue(),
+        "Download Excel",
+        data=output.getvalue(),
         file_name="result.xlsx"
     )
+
+    # =========================
+    # Reset Button
+    # =========================
+    if st.button("Reset 🔄"):
+        st.experimental_rerun()
