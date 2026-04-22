@@ -4,13 +4,19 @@ import io
 import re
 
 st.set_page_config(page_title="Washing Date App")
-
 st.title("📊 Washing Date Processor")
 
 # =========================
-# Reset Button (อยู่บนสุด)
+# Session State
+# =========================
+if "processed" not in st.session_state:
+    st.session_state.processed = False
+
+# =========================
+# Reset Button
 # =========================
 if st.button("Reset 🔄"):
+    st.session_state.clear()
     st.rerun()
 
 # =========================
@@ -19,11 +25,18 @@ if st.button("Reset 🔄"):
 file1 = st.file_uploader("Upload File 1 (Lot/Serial)", type=["xlsx","xls","csv"])
 file2 = st.file_uploader("Upload File 2 (Runcard)", type=["xlsx","xls","csv"])
 
+# =========================
+# Process Button
+# =========================
 if file1 and file2:
+    if st.button("Process 🚀"):
+        st.session_state.processed = True
 
-    # =========================
-    # Read File
-    # =========================
+# =========================
+# MAIN LOGIC (ทำเมื่อกด Process เท่านั้น)
+# =========================
+if st.session_state.processed and file1 and file2:
+
     def read_file(file):
         if file.name.endswith('.csv'):
             return pd.read_csv(file)
@@ -36,30 +49,18 @@ if file1 and file2:
     df1 = read_file(file1)
     df2 = read_file(file2)
 
-    # =========================
-    # Clean Column
-    # =========================
     df1.columns = df1.columns.astype(str).str.strip()
     df2.columns = df2.columns.astype(str).str.strip()
 
     df1 = df1.rename(columns={"Lot/Serial": "Lot"})
     df2 = df2.rename(columns={"Runcard No": "Lot"})
 
-    if "Lot" not in df1.columns or "Lot" not in df2.columns:
-        st.error("❌ หา column Lot ไม่เจอ เช็คชื่อ column อีกที")
-        st.stop()
-
     df1["Lot"] = df1["Lot"].astype(str).str.strip()
     df2["Lot"] = df2["Lot"].astype(str).str.strip()
 
-    # =========================
-    # 🔥 FIX สำคัญ: 1 Lot = 1 แถว
-    # =========================
+    # 🔥 FIX duplicate
     df2 = df2.drop_duplicates(subset=["Lot"])
 
-    # =========================
-    # Merge (เอาเฉพาะ Lot จากไฟล์ 1)
-    # =========================
     merged = pd.merge(
         df1[["Lot"]],
         df2[["Lot", "Barcode No"]],
@@ -67,9 +68,6 @@ if file1 and file2:
         how="left"
     )
 
-    # =========================
-    # Extract WW + Day
-    # =========================
     def extract_ww_day(barcode):
         try:
             s = str(barcode)
@@ -83,9 +81,7 @@ if file1 and file2:
             if len(code) != 3 or not code.isdigit():
                 return None, None
 
-            ww = int(code[:2])
-            day = int(code[2])
-            return ww, day
+            return int(code[:2]), int(code[2])
         except:
             return None, None
 
@@ -464,22 +460,11 @@ if file1 and file2:
 """
     date_db = pd.read_csv(io.StringIO(data))
 
-    # =========================
-    # Map Date
-    # =========================
-    result = pd.merge(
-        merged,
-        date_db,
-        on=["WW","Day"],
-        how="left"
-    )
+    result = pd.merge(merged, date_db, on=["WW","Day"], how="left")
 
     result = result[["Lot","Barcode No","Date"]]
     result = result.rename(columns={"Date":"Washing Date"})
 
-    # =========================
-    # Summary
-    # =========================
     summary = (
         result.groupby("Washing Date")["Lot"]
         .count()
@@ -487,18 +472,13 @@ if file1 and file2:
         .rename(columns={"Lot":"Total Lot"})
     )
 
-    # =========================
-    # Show Result
-    # =========================
     st.subheader("Result")
     st.dataframe(result, use_container_width=True)
 
     st.subheader("Summary")
     st.dataframe(summary, use_container_width=True)
 
-    # =========================
-    # Download Excel
-    # =========================
+    # Download
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         result.to_excel(writer, index=False, sheet_name="Result")
@@ -508,4 +488,3 @@ if file1 and file2:
         "📥 Download Excel",
         data=output.getvalue(),
         file_name="washing_date_result.xlsx"
-    )
