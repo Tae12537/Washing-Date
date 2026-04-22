@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="Washing Date App", layout="wide")
 
-st.title("📊 Lot / Barcode Processor")
+st.title("📊 Washing Date Processor")
 
 # =========================
 # Session (reset control)
