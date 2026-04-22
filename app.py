@@ -5,10 +5,10 @@ import re
 
 st.set_page_config(page_title="Washing Date App", layout="wide")
 
-st.title("📊 Washing Date Processor")
+st.title("📊 Lot / Barcode Processor")
 
 # =========================
-# Session (สำหรับ reset)
+# Session (reset control)
 # =========================
 if "key" not in st.session_state:
     st.session_state.key = 0
@@ -32,19 +32,31 @@ file2 = st.file_uploader(
 # Functions
 # =========================
 def read_file(file):
-    if file.name.endswith('.csv'):
-        return pd.read_csv(file)
     try:
-        return pd.read_excel(file, engine='openpyxl')
-    except:
-        return pd.read_excel(file, engine='xlrd')
+        if file.name.endswith('.csv'):
+            return pd.read_csv(file)
+        try:
+            return pd.read_excel(file, engine='openpyxl')
+        except:
+            return pd.read_excel(file, engine='xlrd')
+    except Exception as e:
+        st.error(f"❌ อ่านไฟล์ไม่ได้: {e}")
+        st.stop()
 
 def find_header(df, keyword):
-    for i in range(10):
+    if df.empty:
+        st.error("❌ ไฟล์ว่าง")
+        st.stop()
+
+    max_rows = min(10, len(df))  # ✅ FIX index error
+
+    for i in range(max_rows):
         row = df.iloc[i].astype(str)
+
         if row.str.contains(keyword, case=False).any():
             df.columns = row
             return df[i+1:]
+
     return df
 
 def extract_ww_day(barcode):
@@ -76,7 +88,7 @@ with col2:
     reset = st.button("🔄 Reset")
 
 # =========================
-# Reset logic
+# Reset
 # =========================
 if reset:
     st.session_state.key += 1
@@ -96,8 +108,22 @@ if file1 and file2 and process:
     df1.columns = df1.columns.astype(str).str.strip()
     df2.columns = df2.columns.astype(str).str.strip()
 
-    df1 = df1.rename(columns={"Lot/Serial": "Lot"})
-    df2 = df2.rename(columns={"Runcard No": "Lot"})
+    # rename กันพัง
+    df1 = df1.rename(columns=lambda x: x.strip())
+    df2 = df2.rename(columns=lambda x: x.strip())
+
+    if "Lot/Serial" in df1.columns:
+        df1 = df1.rename(columns={"Lot/Serial": "Lot"})
+    if "Runcard No" in df2.columns:
+        df2 = df2.rename(columns={"Runcard No": "Lot"})
+
+    if "Lot" not in df1.columns or "Lot" not in df2.columns:
+        st.error("❌ ไม่เจอ column Lot")
+        st.stop()
+
+    if "Barcode No" not in df2.columns:
+        st.error("❌ ไม่เจอ column Barcode No")
+        st.stop()
 
     df1["Lot"] = df1["Lot"].astype(str).str.strip()
     df2["Lot"] = df2["Lot"].astype(str).str.strip()
@@ -109,12 +135,16 @@ if file1 and file2 and process:
         how="inner"
     )
 
+    if merged.empty:
+        st.warning("⚠️ ไม่พบข้อมูลที่ match กัน")
+        st.stop()
+
     merged[['WW', 'Day']] = merged['Barcode No'].apply(
         lambda x: pd.Series(extract_ww_day(x))
     )
 
     # =========================
-    # Date DB (ใส่ full ได้)
+    # Date DB (ใส่เต็มได้)
     # =========================
     data = """WW,Day,Date
 28,1,03-Jan-2026
