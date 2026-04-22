@@ -3,7 +3,15 @@ import pandas as pd
 import io
 import re
 
+st.set_page_config(page_title="Washing Date App")
+
 st.title("📊 Washing Date Processor")
+
+# =========================
+# Reset Button (อยู่บนสุด)
+# =========================
+if st.button("Reset 🔄"):
+    st.rerun()
 
 # =========================
 # Upload Files
@@ -37,19 +45,27 @@ if file1 and file2:
     df1 = df1.rename(columns={"Lot/Serial": "Lot"})
     df2 = df2.rename(columns={"Runcard No": "Lot"})
 
+    if "Lot" not in df1.columns or "Lot" not in df2.columns:
+        st.error("❌ หา column Lot ไม่เจอ เช็คชื่อ column อีกที")
+        st.stop()
+
     df1["Lot"] = df1["Lot"].astype(str).str.strip()
     df2["Lot"] = df2["Lot"].astype(str).str.strip()
 
     # =========================
-    # IMPORTANT FIX 🔥
-    # เอาแค่ 1 row ต่อ lot
+    # 🔥 FIX สำคัญ: 1 Lot = 1 แถว
     # =========================
     df2 = df2.drop_duplicates(subset=["Lot"])
 
     # =========================
-    # Merge (เอาเฉพาะ lot จากไฟล์ 1)
+    # Merge (เอาเฉพาะ Lot จากไฟล์ 1)
     # =========================
-    merged = pd.merge(df1[["Lot"]], df2[["Lot","Barcode No"]], on="Lot", how="left")
+    merged = pd.merge(
+        df1[["Lot"]],
+        df2[["Lot", "Barcode No"]],
+        on="Lot",
+        how="left"
+    )
 
     # =========================
     # Extract WW + Day
@@ -67,7 +83,9 @@ if file1 and file2:
             if len(code) != 3 or not code.isdigit():
                 return None, None
 
-            return int(code[:2]), int(code[2])
+            ww = int(code[:2])
+            day = int(code[2])
+            return ww, day
         except:
             return None, None
 
@@ -76,7 +94,7 @@ if file1 and file2:
     )
 
     # =========================
-    # Date DB
+    # Date DB (ใส่เต็มได้)
     # =========================
     data = """WW,Day,Date
 28,1,03-Jan-2026
@@ -442,13 +460,19 @@ if file1 and file2:
 26,4,29-Dec-2026
 26,5,30-Dec-2026
 26,6,31-Dec-2026
+
 """
     date_db = pd.read_csv(io.StringIO(data))
 
     # =========================
     # Map Date
     # =========================
-    result = pd.merge(merged, date_db, on=["WW","Day"], how="left")
+    result = pd.merge(
+        merged,
+        date_db,
+        on=["WW","Day"],
+        how="left"
+    )
 
     result = result[["Lot","Barcode No","Date"]]
     result = result.rename(columns={"Date":"Washing Date"})
@@ -466,14 +490,14 @@ if file1 and file2:
     # =========================
     # Show Result
     # =========================
-    st.write("### Result")
-    st.dataframe(result)
+    st.subheader("Result")
+    st.dataframe(result, use_container_width=True)
 
-    st.write("### Summary")
-    st.dataframe(summary)
+    st.subheader("Summary")
+    st.dataframe(summary, use_container_width=True)
 
     # =========================
-    # Download
+    # Download Excel
     # =========================
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -481,13 +505,7 @@ if file1 and file2:
         summary.to_excel(writer, index=False, sheet_name="Summary")
 
     st.download_button(
-        "Download Excel",
+        "📥 Download Excel",
         data=output.getvalue(),
-        file_name="result.xlsx"
+        file_name="washing_date_result.xlsx"
     )
-
-    # =========================
-    # Reset Button
-    # =========================
-    if st.button("Reset 🔄"):
-        st.experimental_rerun()
