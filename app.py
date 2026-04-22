@@ -9,6 +9,9 @@ st.title("📊 Washing Date Processor")
 # =========================
 # Session State
 # =========================
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
 if "processed" not in st.session_state:
     st.session_state.processed = False
 
@@ -16,26 +19,39 @@ if "processed" not in st.session_state:
 # Reset Button
 # =========================
 if st.button("Reset 🔄"):
-    st.session_state.clear()
+    st.session_state.uploader_key += 1   # 🔥 สำคัญ: เปลี่ยน key → ล้างไฟล์
+    st.session_state.processed = False
     st.rerun()
 
 # =========================
-# Upload Files
+# Upload Files (มี key)
 # =========================
-file1 = st.file_uploader("Upload File 1 (Lot/Serial)", type=["xlsx","xls","csv"])
-file2 = st.file_uploader("Upload File 2 (Runcard)", type=["xlsx","xls","csv"])
+file1 = st.file_uploader(
+    "Upload File 1 (Lot/Serial)",
+    type=["xlsx","xls","csv"],
+    key=f"file1_{st.session_state.uploader_key}"
+)
+
+file2 = st.file_uploader(
+    "Upload File 2 (Runcard)",
+    type=["xlsx","xls","csv"],
+    key=f"file2_{st.session_state.uploader_key}"
+)
 
 # =========================
-# Process Button
+# Process Button (อยู่ตลอด)
 # =========================
-if file1 and file2:
-    if st.button("Process 🚀"):
-        st.session_state.processed = True
+if st.button("Process 🚀"):
+    st.session_state.processed = True
 
 # =========================
-# MAIN LOGIC (ทำเมื่อกด Process เท่านั้น)
+# MAIN LOGIC
 # =========================
-if st.session_state.processed and file1 and file2:
+if st.session_state.processed:
+
+    if not file1 or not file2:
+        st.warning("⚠️ กรุณาอัปโหลดไฟล์ให้ครบก่อน")
+        st.stop()
 
     def read_file(file):
         if file.name.endswith('.csv'):
@@ -54,6 +70,10 @@ if st.session_state.processed and file1 and file2:
 
     df1 = df1.rename(columns={"Lot/Serial": "Lot"})
     df2 = df2.rename(columns={"Runcard No": "Lot"})
+
+    if "Lot" not in df1.columns or "Lot" not in df2.columns:
+        st.error("❌ หา column Lot ไม่เจอ")
+        st.stop()
 
     df1["Lot"] = df1["Lot"].astype(str).str.strip()
     df2["Lot"] = df2["Lot"].astype(str).str.strip()
@@ -90,7 +110,7 @@ if st.session_state.processed and file1 and file2:
     )
 
     # =========================
-    # Date DB (ใส่เต็มได้)
+    # Date DB
     # =========================
     data = """WW,Day,Date
 28,1,03-Jan-2026
