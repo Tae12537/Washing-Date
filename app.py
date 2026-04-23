@@ -6,47 +6,49 @@ import re
 st.title("📊 Washing Date Processor")
 
 # =========================
-# Upload
-# =========================
-file1 = st.file_uploader("📂 Upload File 1 (Lot Shipment)", type=["xlsx", "xls"])
-file2 = st.file_uploader("📂 Upload File 2 (Runcard Data)", type=["xlsx", "xls"])
-
-# =========================
-# Reset
+# Reset (ล้างจริง)
 # =========================
 if st.button("🔄 Reset"):
-    st.session_state.clear()
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
     st.rerun()
 
 # =========================
-# Read File 1 (Fix Position)
+# Upload
+# =========================
+file1 = st.file_uploader("📂 Upload File 1 (Lot Shipment)", type=["xlsx", "xls"], key="f1")
+file2 = st.file_uploader("📂 Upload File 2 (Runcard Data)", type=["xlsx", "xls"], key="f2")
+
+# =========================
+# Read File 1 (Fix + ตัดท้าย)
 # =========================
 def read_file1(file):
     df = pd.read_excel(file, header=None)
 
-    # check format
     if str(df.iloc[15, 5]).strip().lower() != "lot/serial":
         st.error("❌ File 1 format ผิด (F16 ต้องเป็น Lot/Serial)")
         st.stop()
 
-    data = df.iloc[16:, 5]
+    data = df.iloc[16:, 5].astype(str).str.strip()
 
-    df_out = pd.DataFrame()
-    df_out["Lot"] = data.astype(str).str.strip()
+    # 🔥 เอาเฉพาะ lot จริง (หยุดเมื่อเจอว่างติดกัน)
+    lots = []
+    for val in data:
+        if val == "" or val.lower() == "nan":
+            break
+        lots.append(val)
 
-    df_out = df_out[df_out["Lot"] != ""]
-    df_out = df_out.dropna()
+    df_out = pd.DataFrame({"Lot": lots})
 
     return df_out
 
 
 # =========================
-# Read File 2 (Fix Position)
+# Read File 2
 # =========================
 def read_file2(file):
     df = pd.read_excel(file, header=None)
 
-    # check format
     if str(df.iloc[3, 1]).strip().lower() != "runcard no":
         st.error("❌ File 2 format ผิด (B4 ต้องเป็น Runcard No)")
         st.stop()
@@ -73,19 +75,16 @@ def read_file2(file):
 def extract_ww_day(barcode):
     try:
         s = str(barcode)
-
         match = re.search('[A-Za-z]', s)
         if not match:
             return None, None
 
-        start = match.start()
-        code = s[start+3:start+6]
+        code = s[match.start()+3:match.start()+6]
 
         if len(code) != 3 or not code.isdigit():
             return None, None
 
         return int(code[:2]), int(code[2])
-
     except:
         return None, None
 
@@ -102,28 +101,18 @@ if st.button("🚀 Process"):
     df1 = read_file1(file1)
     df2 = read_file2(file2)
 
-    # merge → เอาเฉพาะ file1
-    merged = pd.merge(
-        df1,
-        df2,
-        on="Lot",
-        how="left"
-    )
-
-    # 1 lot = 1 row
+    merged = pd.merge(df1, df2, on="Lot", how="left")
     merged = merged.drop_duplicates(subset=["Lot"])
 
-    # extract WW Day
     merged[['WW', 'Day']] = merged['Barcode No'].apply(
         lambda x: pd.Series(extract_ww_day(x))
     )
 
-    # แปลง type กัน error
     merged["WW"] = pd.to_numeric(merged["WW"], errors="coerce")
     merged["Day"] = pd.to_numeric(merged["Day"], errors="coerce")
 
     # =========================
-    # Date DB (ใส่เต็มได้)
+    # Date DB
     # =========================
     data = """WW,Day,Date
 28,1,03-Jan-2026
@@ -491,12 +480,10 @@ if st.button("🚀 Process"):
 26,6,31-Dec-2026
 
 """
-
     date_db = pd.read_csv(io.StringIO(data))
     date_db["WW"] = pd.to_numeric(date_db["WW"])
     date_db["Day"] = pd.to_numeric(date_db["Day"])
 
-    # merge date
     result = pd.merge(merged, date_db, on=["WW", "Day"], how="left")
 
     output = result[["Lot", "Barcode No", "Date"]]
@@ -513,21 +500,24 @@ if st.button("🚀 Process"):
     )
 
     # =========================
-    # Export Excel
+    # Show on Web (เพิ่มแล้ว)
+    # =========================
+    st.success("✅ เสร็จแล้ว")
+
+    st.subheader("📋 Result")
+    st.dataframe(output)
+
+    st.subheader("📊 Summary")
+    st.dataframe(summary)
+
+    # =========================
+    # Export Excel (2 sheet)
     # =========================
     output_file = io.BytesIO()
 
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         output.to_excel(writer, index=False, sheet_name="Result")
-
-        start_row = len(output) + 3
-        summary.to_excel(writer, index=False, sheet_name="Result", startrow=start_row)
-
-    # =========================
-    # Show Result
-    # =========================
-    st.success("✅ เสร็จแล้ว")
-    st.dataframe(output)
+        summary.to_excel(writer, index=False, sheet_name="Summary")
 
     st.download_button(
         "📥 Download Excel",
