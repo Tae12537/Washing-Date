@@ -6,17 +6,18 @@ import re
 st.title("📊 Washing Date Processor")
 
 # =========================
-# SESSION (ใช้คุม reset uploader)
+# SESSION (สำหรับ uploader)
 # =========================
 if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = 0
+    st.session_state["uploader_key"] = 0
 
 # =========================
-# RESET
+# RESET (แก้ไม่ให้พัง + ลบไฟล์จริง)
 # =========================
 if st.button("🔄 Reset"):
+    key = st.session_state.get("uploader_key", 0)
     st.session_state.clear()
-    st.session_state.uploader_key += 1
+    st.session_state["uploader_key"] = key + 1
     st.rerun()
 
 # =========================
@@ -25,13 +26,13 @@ if st.button("🔄 Reset"):
 file1 = st.file_uploader(
     "📂 Upload File 1 (Lot/Serial)",
     type=["xlsx", "xls", "csv"],
-    key=f"file1_{st.session_state.uploader_key}"
+    key=f"file1_{st.session_state['uploader_key']}"
 )
 
 file2 = st.file_uploader(
     "📂 Upload File 2 (Runcard / Barcode)",
     type=["xlsx", "xls", "csv"],
-    key=f"file2_{st.session_state.uploader_key}"
+    key=f"file2_{st.session_state['uploader_key']}"
 )
 
 # =========================
@@ -45,8 +46,8 @@ process = st.button("🚀 Process")
 def read_file1(uploaded_file):
     df = pd.read_excel(uploaded_file, header=None)
 
-    col_index = 5   # F
-    start_row = 15  # row 16
+    col_index = 5
+    start_row = 15
 
     data = []
     for i in range(start_row, len(df)):
@@ -66,9 +67,9 @@ def read_file1(uploaded_file):
 def read_file2(uploaded_file):
     df = pd.read_excel(uploaded_file, header=None)
 
-    lot_col = 1   # B
-    barcode_col = 8  # I
-    start_row = 4  # row 5
+    lot_col = 1
+    barcode_col = 8
+    start_row = 4
 
     data = []
     for i in range(start_row, len(df)):
@@ -112,35 +113,9 @@ def extract_ww_day(barcode):
 
 
 # =========================
-# MAIN PROCESS
+# DATE DB (เหมือนเดิม)
 # =========================
-if process:
-
-    if not file1 or not file2:
-        st.warning("⚠️ กรุณาอัปโหลดไฟล์ให้ครบก่อน")
-        st.stop()
-
-    df1 = read_file1(file1)
-    df2 = read_file2(file2)
-
-    # เอาเฉพาะ lot จาก file1
-    df1 = df1.drop_duplicates()
-
-    # merge (เอาเฉพาะ lot file1)
-    merged = pd.merge(df1, df2, on="Lot", how="left")
-
-    # ไม่ให้ซ้ำ
-    merged = merged.drop_duplicates(subset=["Lot"])
-
-    # extract WW Day
-    merged[['WW', 'Day']] = merged['Barcode No'].apply(
-        lambda x: pd.Series(extract_ww_day(x))
-    )
-
-    # =========================
-    # DATE DB (ใส่เต็มปีได้)
-    # =========================
-    data = """WW,Day,Date
+data = """WW,Day,Date
 28,1,03-Jan-2026
 28,2,04-Jan-2026
 28,3,05-Jan-2026
@@ -506,25 +481,40 @@ if process:
 26,6,31-Dec-2026
 
 """
+date_db = pd.read_csv(io.StringIO(data))
+date_db["WW"] = date_db["WW"].astype(int)
+date_db["Day"] = date_db["Day"].astype(int)
 
-    date_db = pd.read_csv(io.StringIO(data))
 
-    date_db["WW"] = date_db["WW"].astype(int)
-    date_db["Day"] = date_db["Day"].astype(int)
+# =========================
+# PROCESS (แก้ให้เก็บ state)
+# =========================
+if process:
+
+    if not file1 or not file2:
+        st.warning("⚠️ กรุณาอัปโหลดไฟล์ให้ครบก่อน")
+        st.stop()
+
+    df1 = read_file1(file1)
+    df2 = read_file2(file2)
+
+    df1 = df1.drop_duplicates()
+
+    merged = pd.merge(df1, df2, on="Lot", how="left")
+    merged = merged.drop_duplicates(subset=["Lot"])
+
+    merged[['WW', 'Day']] = merged['Barcode No'].apply(
+        lambda x: pd.Series(extract_ww_day(x))
+    )
 
     merged["WW"] = pd.to_numeric(merged["WW"], errors="coerce")
     merged["Day"] = pd.to_numeric(merged["Day"], errors="coerce")
 
-    # map date
     result = pd.merge(merged, date_db, on=["WW", "Day"], how="left")
-
     result = result.rename(columns={"Date": "Washing Date"})
 
     output = result[["Lot", "Barcode No", "Washing Date"]]
 
-    # =========================
-    # SUMMARY
-    # =========================
     summary = (
         output.groupby("Washing Date")["Lot"]
         .count()
@@ -532,22 +522,29 @@ if process:
         .rename(columns={"Lot": "Total Lot"})
     )
 
-    # =========================
-    # SHOW RESULT
-    # =========================
+    # ✅ เก็บไว้กันหายตอนกดปุ่มอื่น
+    st.session_state["output"] = output
+    st.session_state["summary"] = summary
+
+
+# =========================
+# SHOW RESULT (ไม่หายแล้ว)
+# =========================
+if "output" in st.session_state:
+
     st.subheader("📄 Result")
-    st.dataframe(output, use_container_width=True)
+    st.dataframe(st.session_state["output"], use_container_width=True)
 
     st.subheader("📊 Summary")
-    st.dataframe(summary, use_container_width=True)
+    st.dataframe(st.session_state["summary"], use_container_width=True)
 
     # =========================
-    # EXPORT EXCEL (2 SHEET)
+    # EXPORT
     # =========================
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        output.to_excel(writer, index=False, sheet_name="Result")
-        summary.to_excel(writer, index=False, sheet_name="Summary")
+        st.session_state["output"].to_excel(writer, index=False, sheet_name="Result")
+        st.session_state["summary"].to_excel(writer, index=False, sheet_name="Summary")
 
     st.download_button(
         label="📥 Download Excel",
