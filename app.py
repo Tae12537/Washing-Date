@@ -6,23 +6,41 @@ import re
 st.title("📊 Washing Date Processor")
 
 # =========================
-# RESET (แก้ให้ใช้ได้จริง)
+# SESSION (ใช้คุม reset uploader)
 # =========================
-if "reset" not in st.session_state:
-    st.session_state.reset = False
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
 
+# =========================
+# RESET
+# =========================
 if st.button("🔄 Reset"):
     st.session_state.clear()
+    st.session_state.uploader_key += 1
     st.rerun()
 
 # =========================
 # Upload Files
 # =========================
-file1 = st.file_uploader("📂 Upload File 1 (Lot/Serial)", type=["xlsx", "xls", "csv"])
-file2 = st.file_uploader("📂 Upload File 2 (Runcard / Barcode)", type=["xlsx", "xls", "csv"])
+file1 = st.file_uploader(
+    "📂 Upload File 1 (Lot/Serial)",
+    type=["xlsx", "xls", "csv"],
+    key=f"file1_{st.session_state.uploader_key}"
+)
+
+file2 = st.file_uploader(
+    "📂 Upload File 2 (Runcard / Barcode)",
+    type=["xlsx", "xls", "csv"],
+    key=f"file2_{st.session_state.uploader_key}"
+)
 
 # =========================
-# Read Excel (Fix position)
+# ปุ่ม Process (อยู่ตลอด)
+# =========================
+process = st.button("🚀 Process")
+
+# =========================
+# Read File 1 (F16 ลงมา)
 # =========================
 def read_file1(uploaded_file):
     df = pd.read_excel(uploaded_file, header=None)
@@ -34,7 +52,6 @@ def read_file1(uploaded_file):
     for i in range(start_row, len(df)):
         val = df.iloc[i, col_index]
 
-        # ✅ กัน error + เอาเฉพาะ lot จริง
         if pd.isna(val) or str(val).strip() == "":
             break
 
@@ -43,6 +60,9 @@ def read_file1(uploaded_file):
     return pd.DataFrame({"Lot": data})
 
 
+# =========================
+# Read File 2 (B4 / I4)
+# =========================
 def read_file2(uploaded_file):
     df = pd.read_excel(uploaded_file, header=None)
 
@@ -94,7 +114,11 @@ def extract_ww_day(barcode):
 # =========================
 # MAIN PROCESS
 # =========================
-if file1 and file2:
+if process:
+
+    if not file1 or not file2:
+        st.warning("⚠️ กรุณาอัปโหลดไฟล์ให้ครบก่อน")
+        st.stop()
 
     df1 = read_file1(file1)
     df2 = read_file2(file2)
@@ -102,10 +126,10 @@ if file1 and file2:
     # เอาเฉพาะ lot จาก file1
     df1 = df1.drop_duplicates()
 
-    # merge แบบไม่ให้เกิน
+    # merge (เอาเฉพาะ lot file1)
     merged = pd.merge(df1, df2, on="Lot", how="left")
 
-    # กัน duplicate
+    # ไม่ให้ซ้ำ
     merged = merged.drop_duplicates(subset=["Lot"])
 
     # extract WW Day
@@ -114,7 +138,7 @@ if file1 and file2:
     )
 
     # =========================
-    # DATE DB
+    # DATE DB (ใส่เต็มปีได้)
     # =========================
     data = """WW,Day,Date
 28,1,03-Jan-2026
@@ -512,13 +536,13 @@ if file1 and file2:
     # SHOW RESULT
     # =========================
     st.subheader("📄 Result")
-    st.dataframe(output)
+    st.dataframe(output, use_container_width=True)
 
     st.subheader("📊 Summary")
-    st.dataframe(summary)
+    st.dataframe(summary, use_container_width=True)
 
     # =========================
-    # EXPORT EXCEL (2 SHEETS)
+    # EXPORT EXCEL (2 SHEET)
     # =========================
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
