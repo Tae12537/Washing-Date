@@ -15,7 +15,13 @@ if "uploader_key" not in st.session_state:
 # RESET
 # =========================
 if st.button("🔄 Reset"):
-    st.session_state.clear()
+    st.session_state.output = None
+    st.session_state.summary = None
+    st.session_state.file = None
+
+    # สำคัญมาก: เปลี่ยน key uploader
+    st.session_state.uploader_key += 1
+
     st.rerun()
 
 # =========================
