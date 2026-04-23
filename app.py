@@ -527,7 +527,12 @@ if st.button("🚀 Process"):
 # =========================
 # SHOW RESULT + DOWNLOAD
 # =========================
-if "output" in st.session_state:
+if (
+    "output" in st.session_state 
+    and st.session_state.output is not None
+    and "file" in st.session_state
+    and st.session_state.file is not None
+):
 
     st.success("✅ Process สำเร็จ")
 
