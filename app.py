@@ -12,7 +12,7 @@ file1 = st.file_uploader("📂 Upload File 1 (Lot Shipment)", type=["xlsx", "xls
 file2 = st.file_uploader("📂 Upload File 2 (Runcard Data)", type=["xlsx", "xls", "csv"])
 
 # =========================
-# Reset Button
+# Reset
 # =========================
 if st.button("🔄 Reset"):
     st.session_state.clear()
@@ -21,16 +21,16 @@ if st.button("🔄 Reset"):
 # =========================
 # Read File
 # =========================
-def read_file(uploaded_file):
-    if uploaded_file.name.endswith('.csv'):
-        return pd.read_csv(uploaded_file)
+def read_file(file):
+    if file.name.endswith(".csv"):
+        return pd.read_csv(file)
     try:
-        return pd.read_excel(uploaded_file, engine='openpyxl')
+        return pd.read_excel(file, engine="openpyxl")
     except:
-        return pd.read_excel(uploaded_file, engine='xlrd')
+        return pd.read_excel(file, engine="xlrd")
 
 # =========================
-# Auto Find Header
+# Find Header
 # =========================
 def find_header(df, keywords):
     max_rows = min(len(df), 20)
@@ -39,12 +39,24 @@ def find_header(df, keywords):
         row = df.iloc[i].astype(str).str.lower()
 
         for key in keywords:
-            if row.str.contains(key.lower()).any():
-                df.columns = df.iloc[i]
+            if row.str.contains(key).any():
+                df.columns = df.iloc[i].astype(str)
                 df = df[i+1:].reset_index(drop=True)
                 return df
 
     return df
+
+# =========================
+# Find Column (กัน error)
+# =========================
+def find_column(columns, keyword):
+    cols = [str(c).lower() for c in columns]
+
+    for i, c in enumerate(cols):
+        if keyword in c:
+            return columns[i]
+
+    return None
 
 # =========================
 # Extract WW / Day
@@ -69,7 +81,7 @@ def extract_ww_day(barcode):
         return None, None
 
 # =========================
-# PROCESS BUTTON (อยู่ตลอด)
+# Process
 # =========================
 if st.button("🚀 Process"):
 
@@ -77,22 +89,26 @@ if st.button("🚀 Process"):
         st.warning("❗ กรุณาอัปโหลดไฟล์ให้ครบ")
         st.stop()
 
-    # อ่านไฟล์
     df1 = read_file(file1)
     df2 = read_file(file2)
 
-    # หา header อัตโนมัติ
+    # หา header
     df1 = find_header(df1, ["lot"])
     df2 = find_header(df2, ["runcard", "barcode"])
 
     df1.columns = df1.columns.astype(str).str.strip()
     df2.columns = df2.columns.astype(str).str.strip()
 
-    # หา column อัตโนมัติ
-    lot_col1 = [c for c in df1.columns if "lot" in c.lower()][0]
-    lot_col2 = [c for c in df2.columns if "runcard" in c.lower()][0]
-    barcode_col = [c for c in df2.columns if "barcode" in c.lower()][0]
+    # หา column
+    lot_col1 = find_column(df1.columns, "lot")
+    lot_col2 = find_column(df2.columns, "runcard")
+    barcode_col = find_column(df2.columns, "barcode")
 
+    if not lot_col1 or not lot_col2 or not barcode_col:
+        st.error("❌ หา column ไม่เจอ (Lot / Runcard / Barcode)")
+        st.stop()
+
+    # rename
     df1 = df1.rename(columns={lot_col1: "Lot"})
     df2 = df2.rename(columns={
         lot_col2: "Lot",
@@ -102,7 +118,7 @@ if st.button("🚀 Process"):
     df1["Lot"] = df1["Lot"].astype(str).str.strip()
     df2["Lot"] = df2["Lot"].astype(str).str.strip()
 
-    # 🔥 เอาเฉพาะ lot จาก file1 เท่านั้น
+    # merge (เอาเฉพาะ file1)
     merged = pd.merge(
         df1[["Lot"]],
         df2[["Lot", "Barcode No"]],
@@ -110,16 +126,16 @@ if st.button("🚀 Process"):
         how="left"
     )
 
-    # ❗ เอาแค่ 1 record ต่อ lot (กันซ้ำ)
+    # เอา 1 lot ต่อ 1 แถว
     merged = merged.drop_duplicates(subset=["Lot"])
 
-    # Extract WW / Day
+    # extract
     merged[['WW', 'Day']] = merged['Barcode No'].apply(
         lambda x: pd.Series(extract_ww_day(x))
     )
 
     # =========================
-    # Date DB (ย่อได้/ขยายได้)
+    # Date DB (ตัวอย่าง)
     # =========================
     data = """WW,Day,Date
 28,1,03-Jan-2026
@@ -495,9 +511,7 @@ if st.button("🚀 Process"):
     output = result[["Lot", "Barcode No", "Date"]]
     output = output.rename(columns={"Date": "Washing Date"})
 
-    # =========================
-    # Summary
-    # =========================
+    # summary
     summary = (
         output.groupby("Washing Date")["Lot"]
         .count()
@@ -505,9 +519,7 @@ if st.button("🚀 Process"):
         .rename(columns={"Lot": "Total Lot"})
     )
 
-    # =========================
-    # Export Excel
-    # =========================
+    # export
     output_file = io.BytesIO()
 
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
@@ -517,11 +529,10 @@ if st.button("🚀 Process"):
         summary.to_excel(writer, index=False, sheet_name="Result", startrow=start_row)
 
     st.success("✅ เสร็จแล้ว")
-
     st.dataframe(output)
 
     st.download_button(
-        label="📥 Download Excel",
+        "📥 Download Excel",
         data=output_file.getvalue(),
         file_name="washing_date_result.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
