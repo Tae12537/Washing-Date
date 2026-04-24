@@ -67,7 +67,7 @@ def read_file1(file):
 def read_file2(file):
     df = read_excel(file)
 
-    # หา header row (แถวที่มีคำว่า Runcard / Barcode)
+    # หา header row
     header_row = None
     for i in range(20):
         row = df.iloc[i].astype(str).str.lower()
@@ -83,12 +83,19 @@ def read_file2(file):
     df.columns = df.iloc[header_row]
     df = df[header_row + 1:]
 
-    # clean column name
+    # ✅ FIX สำคัญ
     df.columns = df.columns.astype(str).str.strip().str.lower()
 
-    # หา column ที่ต้องใช้
-    lot_col = [c for c in df.columns if "runcard" in c][0]
-    barcode_col = [c for c in df.columns if "barcode" in c][0]
+    # ✅ กันพังกรณีหาไม่เจอ
+    lot_cols = [c for c in df.columns if "runcard" in c]
+    barcode_cols = [c for c in df.columns if "barcode" in c]
+
+    if len(lot_cols) == 0 or len(barcode_cols) == 0:
+        st.error(f"❌ หา column ไม่เจอ\nColumns ที่มี: {list(df.columns)}")
+        return pd.DataFrame()
+
+    lot_col = lot_cols[0]
+    barcode_col = barcode_cols[0]
 
     df_out = df[[lot_col, barcode_col]].copy()
     df_out.columns = ["Lot", "Barcode No"]
