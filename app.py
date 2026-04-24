@@ -12,16 +12,13 @@ if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
 # =========================
-# RESET
+# RESET (FIX แล้ว)
 # =========================
 if st.button("🔄 Reset"):
     st.session_state.output = None
     st.session_state.summary = None
     st.session_state.file = None
-
-    # สำคัญมาก: เปลี่ยน key uploader
     st.session_state.uploader_key += 1
-
     st.rerun()
 
 # =========================
@@ -51,7 +48,7 @@ def read_excel(file):
 def read_file1(file):
     df = read_excel(file)
 
-    col = 5      # F
+    col = 5
     start_row = 16
 
     data = df.iloc[start_row:, col]
@@ -125,7 +122,9 @@ if st.button("🚀 Process"):
             lambda x: pd.Series(extract_ww_day(x))
         )
 
-        # DB
+        # =========================
+        # DATE DB (เหมือนเดิม)
+        # =========================
         data = """WW,Day,Date
 28,1,03-Jan-2026
 28,2,04-Jan-2026
@@ -493,15 +492,27 @@ if st.button("🚀 Process"):
 
 """
         date_db = pd.read_csv(io.StringIO(data))
-        date_db["WW"] = date_db["WW"].astype(int)
-        date_db["Day"] = date_db["Day"].astype(int)
 
+        # =========================
+        # ✅ FIX สำคัญ: แปลง dtype ก่อน merge
+        # =========================
+        merged["WW"] = pd.to_numeric(merged["WW"], errors="coerce")
+        merged["Day"] = pd.to_numeric(merged["Day"], errors="coerce")
+
+        date_db["WW"] = pd.to_numeric(date_db["WW"], errors="coerce")
+        date_db["Day"] = pd.to_numeric(date_db["Day"], errors="coerce")
+
+        # =========================
+        # MERGE
+        # =========================
         result = pd.merge(merged, date_db, on=["WW", "Day"], how="left")
 
+        # =========================
+        # OUTPUT
+        # =========================
         output = result[["Lot", "Barcode No", "WW", "Day", "Date"]].copy()
         output = output.rename(columns={"Date": "Washing Date"})
 
-        # remove header ซ้ำ
         output = output[output["Lot"].astype(str).str.lower() != "lot/serial"]
         output = output.reset_index(drop=True)
 
@@ -512,7 +523,9 @@ if st.button("🚀 Process"):
             .rename(columns={"Lot": "Total Lot"})
         )
 
-        # ===== ✅ FIX ตรงนี้ (เก็บ state) =====
+        # =========================
+        # SAVE TO SESSION (fix download หาย)
+        # =========================
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             output.to_excel(writer, index=False, sheet_name="Result")
@@ -525,10 +538,10 @@ if st.button("🚀 Process"):
         st.session_state.file = buffer.getvalue()
 
 # =========================
-# SHOW RESULT + DOWNLOAD
+# SHOW RESULT + DOWNLOAD (fix crash)
 # =========================
 if (
-    "output" in st.session_state 
+    "output" in st.session_state
     and st.session_state.output is not None
     and "file" in st.session_state
     and st.session_state.file is not None
