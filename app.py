@@ -67,15 +67,31 @@ def read_file1(file):
 def read_file2(file):
     df = read_excel(file)
 
-    start_row = 4
+    # หา header row (แถวที่มีคำว่า Runcard / Barcode)
+    header_row = None
+    for i in range(20):
+        row = df.iloc[i].astype(str).str.lower()
+        if row.str.contains("runcard").any() and row.str.contains("barcode").any():
+            header_row = i
+            break
 
-    lot = df.iloc[start_row:, 1]
-    barcode = df.iloc[start_row:, 8]
+    if header_row is None:
+        st.error("❌ หา header ไม่เจอ (Runcard / Barcode)")
+        return pd.DataFrame()
 
-    df_out = pd.DataFrame({
-        "Lot": lot,
-        "Barcode No": barcode
-    })
+    # ตั้ง header
+    df.columns = df.iloc[header_row]
+    df = df[header_row + 1:]
+
+    # clean column name
+    df.columns = df.columns.astype(str).str.strip().str.lower()
+
+    # หา column ที่ต้องใช้
+    lot_col = [c for c in df.columns if "runcard" in c][0]
+    barcode_col = [c for c in df.columns if "barcode" in c][0]
+
+    df_out = df[[lot_col, barcode_col]].copy()
+    df_out.columns = ["Lot", "Barcode No"]
 
     df_out = df_out.dropna(subset=["Lot"])
     df_out["Lot"] = df_out["Lot"].astype(str).str.strip()
