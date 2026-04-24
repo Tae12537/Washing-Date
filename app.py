@@ -88,7 +88,7 @@ def read_file2(file):
 
     # ✅ กันพังกรณีหาไม่เจอ
     lot_cols = [c for c in df.columns if "runcard" in str(c).lower()]
-barcode_cols = [c for c in df.columns if "barcode" in str(c).lower()]
+    barcode_cols = [c for c in df.columns if "barcode" in str(c).lower()]
 
     if len(lot_cols) == 0 or len(barcode_cols) == 0:
         st.error(f"❌ หา column ไม่เจอ\nColumns ที่มี: {list(df.columns)}")
