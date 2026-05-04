@@ -141,16 +141,30 @@ if st.button("🚀 Process"):
     if file1 is None or file2 is None:
         st.warning("⚠️ กรุณาอัพโหลดไฟล์ให้ครบ")
     else:
-        # อ่านไฟล์จากโฟลเดอร์ตามปีที่เลือก
         filename = f"{year}.txt"
         
         if not os.path.exists(filename):
             st.error(f"❌ ไม่พบไฟล์ `{filename}` กรุณาสร้างไฟล์ `.txt` สำหรับปีนี้ไว้ในโฟลเดอร์เดียวกับโปรแกรม")
         else:
-            with open(filename, "r", encoding="utf-8") as f:
-                data = f.read()
-            
-            date_db = pd.read_csv(io.StringIO(data))
+            # =========================
+            # ✅ FIX: อ่านข้อมูล Date DB ให้รองรับกรณีลืมใส่หัวตาราง และตัดช่องว่าง
+            # =========================
+            try:
+                # อ่านไฟล์มาก่อน
+                date_db = pd.read_csv(filename)
+                
+                # ตัดช่องว่างซ้ายขวาในชื่อ Column ป้องกันการพิมพ์เว้นวรรคผิด
+                date_db.columns = date_db.columns.str.strip()
+                
+                # ถ้าเช็คแล้วยังไม่มีคอลัมน์ "WW" แปลว่าตอนสร้างไฟล์ txt ลืมก๊อปบรรทัดแรก (WW,Day,Date) มาใส่
+                # ให้ตั้งชื่อหัวคอลัมน์ให้ใหม่แบบอัตโนมัติเลย
+                if "WW" not in date_db.columns:
+                    date_db = pd.read_csv(filename, header=None, names=["WW", "Day", "Date"])
+                    
+            except Exception as e:
+                st.error(f"❌ ไม่สามารถอ่านไฟล์ {filename} ได้: {e}")
+                st.stop() # หยุดการทำงานถอดรหัสชั่วคราว
+
             df1 = read_file1(file1)
             df2 = read_file2(file2)
 
