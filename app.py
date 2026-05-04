@@ -67,7 +67,7 @@ def read_file1(file):
 def read_file2(file):
     df = read_excel(file)
  
-    # หา header row (เหมือนเดิม)
+    # หา header row (ของเดิม)
     header_row = None
     for i in range(20):
         row = df.iloc[i].astype(str).str.lower()
@@ -79,13 +79,12 @@ def read_file2(file):
         st.error("❌ หา header ไม่เจอ (Runcard / Barcode)")
         return pd.DataFrame()
  
-    # ตั้ง header
     df.columns = df.iloc[header_row]
     df = df[header_row + 1:]
  
     df.columns = df.columns.astype(str).str.strip().str.lower()
  
-    # 🔥 ของเดิมคุณใช้ตรงนี้ → ไม่แก้
+    # ของเดิม
     lot_cols = [c for c in df.columns if "runcard" in str(c).lower()]
     barcode_cols = [c for c in df.columns if "barcode" in str(c).lower()]
  
@@ -97,7 +96,7 @@ def read_file2(file):
     barcode_col = barcode_cols[0]
  
     # =========================
-    # ✅ เพิ่ม Packed Date (ไม่กระทบของเดิม)
+    # ✅ เพิ่ม Packed Date (แก้ bug string ด้วย)
     # =========================
     packed_col = None
     for c in df.columns:
@@ -142,7 +141,7 @@ def extract_ww_day(barcode):
         return None, None
  
 # =========================
-# LOAD DATABASE (ใหม่)
+# LOAD DATABASE
 # =========================
 def load_database():
     df = pd.read_csv("database.txt")
@@ -150,7 +149,7 @@ def load_database():
     return df
  
 # =========================
-# เลือกวันที่ใกล้สุด
+# FIND BEST DATE
 # =========================
 def find_best_date(row, date_db):
     if pd.isna(row["WW"]) or pd.isna(row["Day"]) or pd.isna(row["Packed Date"]):
@@ -190,23 +189,22 @@ if st.button("🚀 Process"):
         merged["WW"] = pd.to_numeric(merged["WW"], errors="coerce")
         merged["Day"] = pd.to_numeric(merged["Day"], errors="coerce")
  
-        # =========================
-        # ✅ ใช้ database.txt แทน
-        # =========================
+        # โหลด database.txt
         date_db = load_database()
  
         date_db["WW"] = pd.to_numeric(date_db["WW"], errors="coerce")
         date_db["Day"] = pd.to_numeric(date_db["Day"], errors="coerce")
  
-        # =========================
-        # 🔥 เลือกวันที่ใกล้ Packed Date
-        # =========================
+        # หา washing date ที่ใกล้ packed date
         merged["Washing Date"] = merged.apply(
             lambda row: find_best_date(row, date_db),
             axis=1
         )
  
         output = merged[["Lot", "Barcode No", "WW", "Day", "Washing Date"]].copy()
+ 
+        # ✅ เอาเวลาออก
+        output["Washing Date"] = pd.to_datetime(output["Washing Date"]).dt.strftime("%d-%b-%Y")
  
         output = output[output["Lot"].astype(str).str.lower() != "lot/serial"]
         output = output.reset_index(drop=True)
@@ -251,4 +249,3 @@ if (
         file_name="washing_date_result.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
- 
