@@ -101,7 +101,8 @@ def read_file2(file):
     # =========================
     packed_col = None
     for c in df.columns:
-        if "packed" in c and "date" in c:
+        c_str = str(c).lower()
+        if "packed" in c_str and "date" in c_str:
             packed_col = c
             break
  
