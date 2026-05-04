@@ -17,15 +17,12 @@ def read_excel(file):
 
 def read_file1(file):
     df = read_excel(file)
-    col = 5  # Column F
-    start_row = 16
-    data = df.iloc[start_row:, col]
+    # ดึง Lot จาก Column F (index 5) ตั้งแต่แถวที่ 17 เป็นต้นไป
+    data = df.iloc[16:, 5]
     lot_list = []
     for val in data:
-        if pd.isna(val): break
-        val_str = str(val).strip()
-        if val_str == "": break
-        lot_list.append(val_str)
+        if pd.isna(val) or str(val).strip() == "": break
+        lot_list.append(str(val).strip())
     return pd.DataFrame({"Lot": lot_list})
 
 def read_file2(file):
@@ -42,113 +39,102 @@ def read_file2(file):
     df_data = df[header_row + 1:].copy()
     df_data.columns = df_data.columns.astype(str).str.strip().str.lower()
 
-    # หาคอลัมน์ Lot และ Barcode
     lot_col = [c for c in df_data.columns if "runcard" in str(c)][0]
     barcode_col = [c for c in df_data.columns if "barcode" in str(c)][0]
-    packing_col = [c for c in df_data.columns if "packing" in str(c) or str(c) == "q4"]
-
-    cols = [lot_col, barcode_col]
-    if packing_col: cols.append(packing_col[0])
-
-    df_out = df_data[cols].copy()
-    df_out.columns = ["Lot", "Barcode No"] + (["Packing Date"] if packing_col else [])
-    df_out = df_out.dropna(subset=["Lot"])
+    
+    df_out = df_data[[lot_col, barcode_col]].copy()
+    df_out.columns = ["Lot", "Barcode No"]
     df_out["Lot"] = df_out["Lot"].astype(str).str.strip()
     return df_out
 
-def extract_info(barcode):
-    """ดึง WW, Day และ Year จาก Barcode โดยตรง"""
+def extract_logic(barcode):
+    """Logic ดึง WW, Day, Year จาก Barcode ตามโครงสร้างที่คุณให้มา"""
     try:
         s = str(barcode)
         match = re.search('[A-Za-z]', s)
         if not match: return None, None, None
         start = match.start()
-        # WW = ตำแหน่งตัวอักษรตัวสุดท้าย + 4 และ 5
-        # Day = ตำแหน่งตัวอักษรตัวสุดท้าย + 6
-        # Year = ตำแหน่งตัวอักษรตัวสุดท้าย + 7
+        # จากตัวอย่าง 760818400AM04336101:
+        # start+3:start+5 คือ '43' (WW)
+        # start+5 คือ '3' (Day)
+        # start+6 คือ '6' (Year 2026)
         ww = int(s[start+3:start+5])
         day = int(s[start+5])
         year_digit = int(s[start+6])
-        full_year = 2020 + year_digit # เช่น 6 -> 2026
-        return ww, day, full_year
+        year = 2020 + year_digit 
+        return ww, day, year
     except:
         return None, None, None
 
 # =========================
-# UI
+# MAIN UI
 # =========================
-st.title("📊 Washing Date Processor (Fixed)")
+st.title("📊 Washing Date Processor")
 
-if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
+if "key" not in st.session_state: st.session_state.key = 0
 
-file1 = st.file_uploader("📂 Upload File 1", type=["xls", "xlsx", "csv"], key=f"f1_{st.session_state.uploader_key}")
-file2 = st.file_uploader("📂 Upload File 2", type=["xls", "xlsx", "csv"], key=f"f2_{st.session_state.uploader_key}")
+f1 = st.file_uploader("📂 Upload File 1 (Lot)", type=["xls", "xlsx"], key=f"f1_{st.session_state.key}")
+f2 = st.file_uploader("📂 Upload File 2 (Barcode)", type=["xls", "xlsx"], key=f"f2_{st.session_state.key}")
 
 if st.button("🚀 Process"):
-    if file1 and file2:
-        df1 = read_file1(file1)
-        df2 = read_file2(file2)
+    if f1 and f2:
+        df1 = read_file1(f1)
+        df2 = read_file2(f2)
 
         if not df1.empty and not df2.empty:
-            # 1. รวมไฟล์ 1 และ 2
-            merged = pd.merge(df1, df2, on="Lot", how="left").drop_duplicates(subset=["Lot"])
+            # 1. รวมไฟล์งาน
+            merged = pd.merge(df1, df2, on="Lot", how="left")
+            
+            # 2. ดึงข้อมูล WW, Day, Year จาก Barcode
+            info = merged['Barcode No'].apply(lambda x: pd.Series(extract_logic(x)))
+            merged[['WW', 'Day', 'Year']] = info
 
-            # 2. ดึงข้อมูลจาก Barcode
-            extracted = merged['Barcode No'].apply(lambda x: pd.Series(extract_info(x)))
-            merged[['WW', 'Day', 'Year']] = extracted
-
-            # 3. โหลด Database (โหลดทั้ง 2025 และ 2026 มาต่อกันกันเหนียว)
-            db_list = []
+            # 3. โหลด Database ทั้งหมด (2025 และ 2026) มาเชื่อมกัน
+            all_dbs = []
             for y in [2025, 2026]:
                 path = f"{y}.txt"
                 if os.path.exists(path):
-                    temp_db = pd.read_csv(path, skipinitialspace=True)
-                    temp_db.columns = [c.strip() for c in temp_db.columns]
-                    # เปลี่ยนชื่อคอลัมน์ให้ตรง
-                    if "Date" in temp_db.columns: temp_db = temp_db.rename(columns={"Date": "Washing Date"})
-                    # บังคับ Type
+                    db = pd.read_csv(path, skipinitialspace=True)
+                    db.columns = [c.strip() for c in db.columns]
+                    # เปลี่ยนชื่อคอลัมน์ Date เป็น Washing Date
+                    if "Date" in db.columns:
+                        db = db.rename(columns={"Date": "Washing Date"})
+                    # บังคับ Type ให้เป็นตัวเลขทั้งหมด
                     for c in ["Year", "WW", "Day"]:
-                        if c in temp_db.columns:
-                            temp_db[c] = pd.to_numeric(temp_db[c], errors='coerce')
-                    db_list.append(temp_db)
+                        if c in db.columns:
+                            db[c] = pd.to_numeric(db[c], errors='coerce')
+                    all_dbs.append(db)
             
-            if not db_list:
-                st.error("❌ ไม่พบไฟล์ฐานข้อมูล 2025.txt หรือ 2026.txt")
+            if not all_dbs:
+                st.error("❌ ไม่พบไฟล์ 2025.txt หรือ 2026.txt ในระบบ")
             else:
-                full_db = pd.concat(db_list).dropna(subset=["Year", "WW", "Day"])
-                full_db[["Year", "WW", "Day"]] = full_db[["Year", "WW", "Day"]].astype(int)
+                db_final = pd.concat(all_dbs).dropna(subset=["Year", "WW", "Day"])
+                db_final[["Year", "WW", "Day"]] = db_final[["Year", "WW", "Day"]].astype(int)
 
-                # 4. Merge กับ Database
-                # บังคับ Type ฝั่งไฟล์งานก่อน Merge
-                merged[["Year", "WW", "Day"]] = merged[["Year", "WW", "Day"]].fillna(0).astype(int)
+                # 4. บังคับ Type ฝั่งไฟล์งานให้เป็น Int ก่อน Merge
+                merged = merged.dropna(subset=["Year", "WW", "Day"])
+                merged[["Year", "WW", "Day"]] = merged[["Year", "WW", "Day"]].astype(int)
+
+                # 5. Merge กับ Database
+                final_result = pd.merge(merged, db_final, on=["Year", "WW", "Day"], how="left")
+
+                # แสดงผล
+                st.success("✅ ดึงข้อมูลสำเร็จ")
+                st.dataframe(final_result[["Lot", "Barcode No", "Year", "WW", "Day", "Washing Date"]])
+
+                # 6. ทำหน้าสรุปและดาวน์โหลด
+                summary = final_result.dropna(subset=["Washing Date"]).groupby("Washing Date").size().reset_index(name="Total Lot")
                 
-                final = pd.merge(merged, full_db, on=["Year", "WW", "Day"], how="left")
-
-                # 5. แสดงผล
-                show_cols = ["Lot", "Barcode No", "Year", "WW", "Day", "Washing Date"]
-                output = final[[c for c in show_cols if c in final.columns]].copy()
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                    final_result.to_excel(writer, index=False, sheet_name="Result")
+                    if not summary.empty:
+                        summary.to_excel(writer, index=False, sheet_name="Summary")
                 
-                st.success("✅ ประมวลผลสำเร็จ")
-                st.dataframe(output, use_container_width=True)
-
-                # 6. Summary & Download
-                valid_data = output.dropna(subset=["Washing Date"])
-                if not valid_data.empty:
-                    summary = valid_data.groupby("Washing Date").size().reset_index(name="Total Lot")
-                    st.subheader("📊 Summary")
-                    st.dataframe(summary)
-
-                    buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine="openpyxl") as wr:
-                        output.to_excel(wr, index=False, sheet_name="Result")
-                        summary.to_excel(wr, index=False, sheet_name="Summary")
-                    st.download_button("📥 Download Excel", buf.getvalue(), "washing_report.xlsx")
-                else:
-                    st.warning("⚠️ Washing Date ไม่ขึ้น! กรุณาเช็คว่า Year, WW, Day ในไฟล์งาน ตรงกับในไฟล์ .txt หรือไม่")
-                    # Debug: แสดงค่าที่ดึงได้
-                    st.write("Debug ข้อมูลที่ดึงได้จากไฟล์งาน (3 แถวแรก):")
-                    st.write(merged[["Year", "WW", "Day"]].head(3))
+                st.download_button("📥 Download Excel Report", buf.getvalue(), "washing_report.xlsx")
+        else:
+            st.error("❌ ข้อมูลในไฟล์ว่างเปล่า หรือหาหัวข้อไม่เจอ")
 
 if st.button("🔄 Reset"):
-    st.session_state.uploader_key += 1
+    st.session_state.key += 1
     st.rerun()
