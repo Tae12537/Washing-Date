@@ -99,20 +99,27 @@ if btn_process and file1 and file2:
         # กำหนดปี
         detected_year = 2026
         if "Packing Date" in df2.columns and not df2["Packing Date"].isnull().all():
-            detected_year = df2["Packing Date"].dt.year.dropna().iloc[0]
+            val = df2["Packing Date"].dropna()
+            if not val.empty:
+                detected_year = pd.to_datetime(val.iloc[0]).year
         
         db_file = f"{int(detected_year)}.txt"
         
         if os.path.exists(db_file):
-            # 1. โหลด DB และทำความสะอาดขั้นสุด (Strip ข้อมูลทุกช่อง)
-            date_db = pd.read_csv(db_file, skipinitialspace=True).astype(str)
-            for c in date_db.columns: date_db[c] = date_db[c].str.strip()
+            # 1. โหลด DB แบบปลอดภัย
+            date_db = pd.read_csv(db_file, skipinitialspace=True)
+            date_db.columns = [c.strip() for c in date_db.columns]
             
-            # บังคับชื่อคอลัมน์และเปลี่ยน Type กลับเป็น Int เพื่อ Merge
-            date_db.columns = [c.replace("Date", "Washing Date") if c == "Date" else c for c in date_db.columns]
+            # บังคับชื่อคอลัมน์ Date เป็น Washing Date
+            date_db = date_db.rename(columns={"Date": "Washing Date"})
+            
+            # แปลง Year, WW, Day เป็นตัวเลขแบบปลอดภัย (แถวไหนไม่ใช่เลขจะกลายเป็น NaN แล้วถูกลบ)
             for col in ["Year", "WW", "Day"]:
                 if col in date_db.columns:
-                    date_db[col] = pd.to_numeric(date_db[col]).astype(int)
+                    date_db[col] = pd.to_numeric(date_db[col], errors='coerce')
+            
+            date_db = date_db.dropna(subset=["Year", "WW", "Day"])
+            date_db[["Year", "WW", "Day"]] = date_db[["Year", "WW", "Day"]].astype(int)
 
             # 2. เตรียมไฟล์งาน
             merged = pd.merge(df1, df2, on="Lot", how="left").drop_duplicates(subset=["Lot"])
@@ -122,34 +129,36 @@ if btn_process and file1 and file2:
             merged["Day"] = pd.to_numeric(merged["Day"], errors="coerce").fillna(0).astype(int)
             merged["Year"] = int(detected_year)
 
-            # 3. Merge (Year, WW, Day)
+            # 3. Merge
             final = pd.merge(merged, date_db, on=["Year", "WW", "Day"], how="left")
 
-            # 4. จัดการผลลัพธ์
-            output = final[["Lot", "Barcode No", "Year", "WW", "Day", "Washing Date", "Packing Date"]].copy()
+            # 4. ผลลัพธ์
+            cols_show = ["Lot", "Barcode No", "Year", "WW", "Day", "Washing Date", "Packing Date"]
+            output = final[[c for c in cols_show if c in final.columns]].copy()
             if "Packing Date" in output.columns:
-                output["Packing Date"] = output["Packing Date"].dt.date
+                output["Packing Date"] = pd.to_datetime(output["Packing Date"]).dt.date
 
-            # 5. หน้าสรุป
+            # 5. สรุป
             summary = pd.DataFrame()
             if "Washing Date" in output.columns:
-                summary = output.dropna(subset=["Washing Date"]).groupby("Washing Date").size().reset_index(name="Total Lot")
+                valid_data = output.dropna(subset=["Washing Date"])
+                if not valid_data.empty:
+                    summary = valid_data.groupby("Washing Date").size().reset_index(name="Total Lot")
 
             # แสดงผล
-            st.success(f"✅ ใช้ฐานข้อมูล: {db_file}")
+            st.success(f"✅ ประมวลผลสำเร็จ (ฐานข้อมูล: {db_file})")
             st.dataframe(output, use_container_width=True)
             
             if not summary.empty:
                 st.subheader("📊 Summary")
                 st.dataframe(summary, use_container_width=True)
                 
-                # Download
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine="openpyxl") as wr:
                     output.to_excel(wr, index=False, sheet_name="Result")
                     summary.to_excel(wr, index=False, sheet_name="Summary")
                 st.download_button("📥 Download Excel", buf.getvalue(), "report.xlsx")
             else:
-                st.warning("⚠️ ไม่พบข้อมูล Washing Date ที่ตรงกันในไฟล์ฐานข้อมูล")
+                st.warning("⚠️ ไม่พบ Washing Date ที่ตรงกับฐานข้อมูล (ตรวจสอบ Year, WW, Day ในไฟล์ .txt)")
         else:
-            st.error(f"❌ ไม่พบไฟล์ {db_file}")
+            st.error(f"❌ ไม่พบไฟล์ฐานข้อมูล `{db_file}` ในระบบ")
