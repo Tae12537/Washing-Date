@@ -5,10 +5,10 @@ import re
 import os
 
 st.set_page_config(page_title="Washing Date Processor", layout="wide")
-st.title("📊 Washing Date Processor (Final Fix)")
+st.title("📊 Washing Date Processor (Database Edition)")
 
 # =========================
-# SESSION STATE & RESET
+# SESSION STATE
 # =========================
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
@@ -58,15 +58,17 @@ def read_file2(file):
     return df_out
 
 def extract_info(barcode):
+    """ดึงข้อมูลจาก Barcode: WW(ตัวที่ 4-5), Day(ตัวที่ 6), Year(ตัวที่ 4 จากท้าย)"""
     try:
         s = str(barcode).strip()
         match = re.search('[A-Za-z]', s)
         if not match: return None, None, None
-        start = match.start()
         
+        start = match.start()
         ww = int(s[start+3:start+5])
         day = int(s[start+5])
-        # ปี: นับจากท้ายสุด ตัวที่ 4 (6 -> 2026, 5 -> 2025)
+        
+        # ปี: ตัวที่ 4 นับจากท้ายสุด (6 -> 2026, 5 -> 2025)
         year_digit = int(s[-4])
         year_val = 2020 + year_digit
         
@@ -75,31 +77,23 @@ def extract_info(barcode):
         return None, None, None
 
 # =========================
-# UPLOAD & PROCESS
+# UPLOAD
 # =========================
 file1 = st.file_uploader("📂 File 1 (Lot)", type=["xls", "xlsx"], key=f"f1_{st.session_state.uploader_key}")
 file2 = st.file_uploader("📂 File 2 (Barcode)", type=["xls", "xlsx"], key=f"f2_{st.session_state.uploader_key}")
 
 if st.button("🚀 Process"):
     if file1 and file2:
-        # 1. โหลดและจัดการ Database แบบยืดหยุ่น
-        db_frames = []
-        for y_val in [2025, 2026]:
-            fname = f"{y_val}.txt"
-            if os.path.exists(fname):
-                tmp_db = pd.read_csv(fname)
-                tmp_db.columns = tmp_db.columns.astype(str).str.strip()
-                
-                # ถ้าในไฟล์ไม่มีคอลัมน์ Year ให้เติมให้เองเลยตามชื่อไฟล์
-                if "Year" not in tmp_db.columns:
-                    tmp_db["Year"] = y_val
-                
-                db_frames.append(tmp_db)
-        
-        if not db_frames:
-            st.error("❌ ไม่พบไฟล์ 2025.txt หรือ 2026.txt")
+        # 1. โหลด database.txt
+        db_path = "database.txt"
+        if not os.path.exists(db_path):
+            st.error(f"❌ ไม่พบไฟล์ `{db_path}` กรุณารวมไฟล์ 2025 และ 2026 เป็นไฟล์เดียวแล้วตั้งชื่อนี้")
         else:
-            date_db = pd.concat(db_frames).drop_duplicates()
+            # อ่าน DB และ Clean หัวตาราง
+            date_db = pd.read_csv(db_path)
+            date_db.columns = date_db.columns.astype(str).str.strip()
+            
+            # บังคับชื่อคอลัมน์ผลลัพธ์
             if "Date" in date_db.columns:
                 date_db = date_db.rename(columns={"Date": "Washing Date"})
 
@@ -112,38 +106,49 @@ if st.button("🚀 Process"):
             extracted = merged['Barcode No'].apply(lambda x: pd.Series(extract_info(x)))
             merged[['WW', 'Day', 'Year']] = extracted
 
-            # 4. แปลงข้อมูลเป็นตัวเลขให้หมดก่อน Merge
-            for col in ["WW", "Day", "Year"]:
+            # 4. 🚨 หัวใจสำคัญ: แปลงเป็นตัวเลข (Int) ทั้ง 2 ฝั่งเพื่อป้องกัน Error ในการ Merge
+            cols_to_match = ["Year", "WW", "Day"]
+            for col in cols_to_match:
+                # ฝั่งไฟล์งาน
                 merged[col] = pd.to_numeric(merged[col], errors="coerce")
+                # ฝั่ง Database
                 date_db[col] = pd.to_numeric(date_db[col], errors="coerce")
 
-            # 5. MERGE (ใช้ 3 ขา)
-            result = pd.merge(merged, date_db, on=["Year", "WW", "Day"], how="left")
+            # ลบแถวที่ดึงเลขไม่ได้ทิ้งไปก่อน
+            merged = merged.dropna(subset=cols_to_match)
+            date_db = date_db.dropna(subset=cols_to_match)
+            
+            # บังคับเป็น Int
+            merged[cols_to_match] = merged[cols_to_match].astype(int)
+            date_db[cols_to_match] = date_db[cols_to_match].astype(int)
 
-            # จัดการผลลัพธ์
-            output = result[["Lot", "Barcode No", "Year", "WW", "Day", "Washing Date"]].copy()
+            # 5. MERGE
+            final_result = pd.merge(merged, date_db, on=["Year", "WW", "Day"], how="left")
+
+            # 6. แสดงผลและเตรียมดาวน์โหลด
+            output = final_result[["Lot", "Barcode No", "Year", "WW", "Day", "Washing Date"]].copy()
             summary = output.dropna(subset=["Washing Date"]).groupby("Washing Date")["Lot"].count().reset_index().rename(columns={"Lot": "Total Lot"})
 
             st.session_state.output = output
             st.session_state.summary = summary
             
-            # สร้างไฟล์ Excel
             buf = io.BytesIO()
             with pd.ExcelWriter(buf, engine="openpyxl") as writer:
                 output.to_excel(writer, index=False, sheet_name="Result")
-                summary.to_excel(writer, index=False, sheet_name="Summary")
+                if not summary.empty:
+                    summary.to_excel(writer, index=False, sheet_name="Summary")
             st.session_state.file = buf.getvalue()
 
 # =========================
 # DISPLAY
 # =========================
 if "output" in st.session_state and st.session_state.output is not None:
-    st.success("✅ ประมวลผลสำเร็จ")
+    st.success("✅ ประมวลผลสำเร็จโดยใช้ database.txt")
     st.dataframe(st.session_state.output, use_container_width=True)
     
     if not st.session_state.summary.empty:
         st.subheader("📊 Summary")
         st.dataframe(st.session_state.summary)
-        st.download_button("📥 Download Excel", st.session_state.file, "result.xlsx")
+        st.download_button("📥 Download Excel", st.session_state.file, "washing_report.xlsx")
     else:
-        st.warning("⚠️ Washing Date ไม่ขึ้น: เป็นไปได้ว่าข้อมูลในไฟล์ .txt ไม่ตรงกับ WW/Day/Year ที่ดึงได้")
+        st.warning("⚠️ Washing Date ยังไม่ขึ้น! กรุณาตรวจสอบข้อมูลใน database.txt ว่ามีเลข Year, WW, Day ที่ตรงกับไฟล์งานหรือไม่")
