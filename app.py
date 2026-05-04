@@ -119,90 +119,90 @@ if btn_process:
         df2 = read_file2(file2)
 
         if not df1.empty and not df2.empty:
-            # ตรวจสอบปีเพื่อเลือกไฟล์
+            # ตรวจสอบปีจาก Packing Date (เอาตัวแรกที่เจอมาหาไฟล์ DB)
             detected_year = 2026
             if "Packing Date" in df2.columns and not df2["Packing Date"].isnull().all():
-                first_date = pd.to_datetime(df2["Packing Date"].dropna().iloc[0])
-                detected_year = first_date.year
+                sample_date = pd.to_datetime(df2["Packing Date"].dropna().iloc[0])
+                detected_year = sample_date.year
             
+            # โหลด DB 2025 หรือ 2026 ตามที่เจอ
             db_filename = f"{int(detected_year)}.txt"
             
             if not os.path.exists(db_filename):
-                st.error(f"❌ ไม่พบไฟล์ฐานข้อมูล `{db_filename}`")
+                st.error(f"❌ ไม่พบไฟล์ฐานข้อมูล `{db_filename}` ใน Folder")
             else:
-                # 1. โหลด DB และทำความสะอาดคอลัมน์
+                # 1. โหลด DB และ Clean ข้อมูลอย่างละเอียด
                 date_db = pd.read_csv(db_filename, skipinitialspace=True)
                 date_db.columns = [c.strip() for c in date_db.columns]
                 
-                # มั่นใจว่าคอลัมน์ Date ชื่อตรงกันแน่นอน
+                # เปลี่ยนชื่อ Date เป็น Washing Date ไว้ก่อนเลย
                 if "Date" in date_db.columns:
                     date_db = date_db.rename(columns={"Date": "Washing Date"})
                 
-                # บังคับประเภทข้อมูล Key ให้เป็น Int
+                # บังคับประเภทข้อมูล Key ใน DB เป็น Int
                 for col in ["Year", "WW", "Day"]:
                     if col in date_db.columns:
                         date_db[col] = pd.to_numeric(date_db[col], errors='coerce').fillna(0).astype(int)
 
-                # 2. เตรียมไฟล์หลัก
+                # 2. เตรียมไฟล์งาน
                 merged = pd.merge(df1, df2, on="Lot", how="left").drop_duplicates(subset=["Lot"])
                 merged[['WW', 'Day']] = merged['Barcode No'].apply(lambda x: pd.Series(extract_ww_day(x)))
                 
-                # บังคับประเภทข้อมูล Key ฝั่งนี้ให้เป็น Int เช่นกัน
+                # บังคับประเภทข้อมูล Key ในไฟล์งานเป็น Int
                 merged["WW"] = pd.to_numeric(merged["WW"], errors="coerce").fillna(0).astype(int)
                 merged["Day"] = pd.to_numeric(merged["Day"], errors="coerce").fillna(0).astype(int)
                 
+                # ดึงปีรายบรรทัด (ถ้ามี Packing Date หลายปีในไฟล์เดียว)
                 if "Packing Date" in merged.columns:
                     merged["Year"] = pd.to_datetime(merged["Packing Date"]).dt.year.fillna(detected_year).astype(int)
                 else:
                     merged["Year"] = int(detected_year)
 
-                # 3. Merge ข้อมูล (ใช้ Year, WW, Day เป็นตัวเชื่อม)
+                # 3. Merge ข้อมูล (จุดสำคัญ)
                 result = pd.merge(merged, date_db, on=["Year", "WW", "Day"], how="left")
 
-                # กรองเฉพาะคอลัมน์ที่ต้องการแสดง
+                # จัดการคอลัมน์แสดงผล
                 final_cols = ["Lot", "Barcode No", "Year", "WW", "Day", "Washing Date", "Packing Date"]
                 output = result[[c for c in final_cols if c in result.columns]].copy()
-                output = output.reset_index(drop=True)
-
-                # 4. ทำหน้าสรุป (Summary)
+                
+                # 4. สร้าง Summary (แก้จุดที่หาย)
                 summary = pd.DataFrame(columns=["Washing Date", "Total Lot"])
                 if "Washing Date" in output.columns:
-                    # ตัดแถวที่หา Washing Date ไม่เจอออกก่อนทำสรุป
-                    valid_output = output.dropna(subset=["Washing Date"])
-                    if not valid_output.empty:
-                        summary = valid_output.groupby("Washing Date")["Lot"].count().reset_index()
-                        summary.columns = ["Washing Date", "Total Lot"]
+                    # ตัดค่าว่างออกก่อนนับ
+                    valid_data = output.dropna(subset=["Washing Date"])
+                    if not valid_data.empty:
+                        summary = valid_data.groupby("Washing Date").size().reset_index(name="Total Lot")
 
-                # 5. เตรียมไฟล์สำหรับ Download (Excel หลาย Sheet)
+                # 5. เขียน Excel
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                     output.to_excel(writer, index=False, sheet_name="Result")
                     if not summary.empty:
                         summary.to_excel(writer, index=False, sheet_name="Summary")
                     else:
-                        # สร้าง sheet เปล่าถ้าไม่มีข้อมูล เพื่อกัน error ตอนโหลด
-                        pd.DataFrame({"Status": ["No Data Found"]}).to_excel(writer, index=False, sheet_name="Summary")
+                        pd.DataFrame({"Status": ["No matching data found in DB"]}).to_excel(writer, index=False, sheet_name="Summary")
                 
                 st.session_state.output = output
                 st.session_state.summary = summary
                 st.session_state.file = buffer.getvalue()
 
 # =========================
-# DISPLAY RESULTS
+# DISPLAY
 # =========================
 if st.session_state.output is not None:
-    st.success("✅ Process สำเร็จ")
+    st.success(f"✅ ประมวลผลเสร็จสิ้น (ใช้ฐานข้อมูล: {detected_year}.txt)")
+    
     st.subheader("📋 Result")
     st.dataframe(st.session_state.output, use_container_width=True)
     
-    if st.session_state.summary is not None and not st.session_state.summary.empty:
-        st.subheader("📊 Summary")
+    st.subheader("📊 Summary")
+    if not st.session_state.summary.empty:
         st.dataframe(st.session_state.summary, use_container_width=True)
     else:
-        st.warning("⚠️ ไม่พบข้อมูล Washing Date ที่ตรงกับฐานข้อมูล จึงไม่สามารถสร้าง Summary ได้")
+        st.warning("⚠️ ไม่พบข้อมูลที่ตรงกันใน Database (Washing Date ว่างเปล่า)")
 
     st.download_button(
-        label="📥 Download Excel (Result + Summary)",
+        label="📥 Download Excel",
         data=st.session_state.file,
         file_name="washing_date_report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
